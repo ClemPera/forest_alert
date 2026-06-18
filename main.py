@@ -62,7 +62,7 @@ class ForestAlertApp:
 
         # Wire callbacks
         self._watcher.on_trigger   = self._on_trigger
-        self._watcher.on_heartbeat = self._dead_man.record_heartbeat
+        self._watcher.on_heartbeat = self._on_heartbeat
 
     # ─── Lifecycle ────────────────────────────────────────────────────────
 
@@ -95,6 +95,12 @@ class ForestAlertApp:
     def _on_trigger(self, keyword: str, message: str, position: Optional[Position]):
         logger.warning(f"🆘 EMERGENCY ALERT — keyword='{keyword}' message='{message}'")
         self._dispatcher.submit(f"SOS Meshtastic [{keyword}]", message, position)
+
+    def _on_heartbeat(self):
+        self._dead_man.record_heartbeat()
+        # A heartbeat means the user is alive — stop retrying any pending
+        # dead-man alert that may still be in flight.
+        self._dispatcher.cancel("Dead Man Switch")
 
     def _on_dead_man(self, reason: str):
         logger.warning(f"💀 DEAD MAN SWITCH — {reason}")
