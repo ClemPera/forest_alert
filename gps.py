@@ -1,5 +1,5 @@
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -9,7 +9,7 @@ class Position:
     longitude: float
     altitude: Optional[float] = None
     timestamp: Optional[int] = None   # unix epoch from the node
-    received_at: float = 0.0          # local time we got this position
+    received_at: float = field(default_factory=time.time)  # local time we got this position
 
     def age_seconds(self) -> float:
         return time.time() - self.received_at

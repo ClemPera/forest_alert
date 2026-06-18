@@ -3,6 +3,7 @@ import smtplib
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.mime.text import MIMEText
+from itertools import count
 from typing import Optional
 
 import requests
@@ -11,6 +12,10 @@ from config import Config
 from gps import Position
 
 logger = logging.getLogger(__name__)
+
+# Monotonic counter guarantees unique JSON-RPC ids even for alerts sent in
+# the same second (the previous time()-based id collided under burst load).
+_rpc_id_counter = count()
 
 
 # ─── Message builder ────────────────────────────────────────────────────────
@@ -53,7 +58,7 @@ def send_signal(config: Config, body: str) -> bool:
     payload = {
         "jsonrpc": "2.0",
         "method": "send",
-        "id": f"alert-{int(time.time())}",
+        "id": f"alert-{next(_rpc_id_counter)}",
         "params": {
             "message": body,
             "recipient": config.signal.contacts,
