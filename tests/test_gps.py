@@ -1,6 +1,11 @@
 from gps import (
+    LOC_EXTERNAL,
+    LOC_INTERNAL,
+    LOC_MANUAL,
+    LOC_UNSET,
     Position,
     _lat_lon_from_dict,
+    _normalize_location_source,
     extract_position_from_node,
     extract_position_from_packet,
 )
@@ -37,6 +42,120 @@ class TestPosition:
         # return ~1.7 billion seconds. It should now default to construction time.
         p = Position(1.0, 2.0)
         assert p.age_seconds() < 1
+
+    def test_str_uses_english_ago(self):
+        # Regression: __str__ used to say "(il y a Xmin)" in French.
+        p = Position(1.0, 2.0, received_at=0.0)
+        assert "il y a" not in str(p)
+        assert "ago" in str(p)
+
+
+class TestPrecisionKm:
+    def test_full_precision(self):
+        p = Position(1.0, 2.0, precision_bits=32)
+        assert p.precision_km() is not None
+        assert p.precision_km() < 0.001  # sub-metre
+
+    def test_20km_precision(self):
+        p = Position(1.0, 2.0, precision_bits=11)
+        km = p.precision_km()
+        assert km is not None
+        assert 19 < km < 20  # ~19.5km
+
+    def test_unknown_returns_none(self):
+        p = Position(1.0, 2.0)
+        assert p.precision_km() is None
+
+
+class TestIsApproximate:
+    def test_low_precision_bits(self):
+        p = Position(1.0, 2.0, precision_bits=11, location_source=LOC_INTERNAL)
+        assert p.is_approximate() is True
+
+    def test_high_precision_internal_gps(self):
+        p = Position(1.0, 2.0, precision_bits=15, location_source=LOC_INTERNAL)
+        assert p.is_approximate() is False
+
+    def test_unset_source(self):
+        p = Position(1.0, 2.0, location_source=LOC_UNSET)
+        assert p.is_approximate() is True
+
+    def test_manual_source(self):
+        p = Position(1.0, 2.0, location_source=LOC_MANUAL)
+        assert p.is_approximate() is True
+
+    def test_external_gps_is_precise(self):
+        p = Position(1.0, 2.0, location_source=LOC_EXTERNAL, precision_bits=17)
+        assert p.is_approximate() is False
+
+    def test_no_quality_info_defaults_to_precise(self):
+        # When we have no quality metadata at all, don't cry wolf.
+        p = Position(1.0, 2.0)
+        assert p.is_approximate() is False
+
+    def test_boundary_12_bits_not_approximate(self):
+        # 12 bits → ~9.8km, just above the 11-bit (~20km) threshold.
+        p = Position(1.0, 2.0, precision_bits=12, location_source=LOC_INTERNAL)
+        assert p.is_approximate() is False
+
+
+class TestQualityWarning:
+    def test_good_fix_returns_none(self):
+        p = Position(1.0, 2.0, precision_bits=17, location_source=LOC_INTERNAL,
+                     sats_in_view=8)
+        assert p.quality_warning() is None
+
+    def test_unset_source(self):
+        p = Position(1.0, 2.0, location_source=LOC_UNSET)
+        w = p.quality_warning()
+        assert w is not None
+        assert "source unknown" in w
+
+    def test_manual_source(self):
+        p = Position(1.0, 2.0, location_source=LOC_MANUAL)
+        w = p.quality_warning()
+        assert w is not None
+        assert "manually entered" in w
+
+    def test_low_precision_includes_km(self):
+        p = Position(1.0, 2.0, precision_bits=11, location_source=LOC_INTERNAL)
+        w = p.quality_warning()
+        assert w is not None
+        assert "low precision" in w
+        assert "km" in w
+
+    def test_low_satellites(self):
+        p = Position(1.0, 2.0, location_source=LOC_INTERNAL,
+                     sats_in_view=2, precision_bits=17)
+        w = p.quality_warning()
+        assert w is not None
+        assert "2 satellites" in w
+
+    def test_multiple_warnings_joined(self):
+        p = Position(1.0, 2.0, location_source=LOC_MANUAL, precision_bits=8)
+        w = p.quality_warning()
+        assert w is not None
+        assert "manually entered" in w
+        assert "low precision" in w
+        assert ";" in w
+
+
+class TestNormalizeLocationSource:
+    def test_int_passthrough(self):
+        assert _normalize_location_source(2) == LOC_INTERNAL
+
+    def test_string_name(self):
+        assert _normalize_location_source("LOC_EXTERNAL") == LOC_EXTERNAL
+
+    def test_none(self):
+        assert _normalize_location_source(None) is None
+
+    def test_invalid_string(self):
+        assert _normalize_location_source("LOC_FOO") is None
+
+    def test_bool_rejected(self):
+        # bool is a subclass of int but should not be accepted.
+        assert _normalize_location_source(True) is None
 
 
 class TestLatLonFromDict:

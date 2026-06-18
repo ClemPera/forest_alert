@@ -3,6 +3,40 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+# Location-source enum values (from meshtastic protobuf Position.location_source).
+LOC_UNSET = 0      # no location source — coordinates may be meaningless
+LOC_MANUAL = 1     # manually entered by the user — may be approximate
+LOC_INTERNAL = 2   # internal GPS module — real fix
+LOC_EXTERNAL = 3   # external GPS source — real fix
+
+# When precision_bits is at or below this threshold the effective horizontal
+# resolution is ~20km or worse (40000km / 2^11 ≈ 19.5km).  Such a position
+# should not be trusted for search/navigation.
+APPROX_PRECISION_BITS = 11
+
+# Accepts either the protobuf enum string ("LOC_INTERNAL") or the raw int.
+_LOCATION_SOURCE_NAMES = {
+    "LOC_UNSET": LOC_UNSET,
+    "LOC_MANUAL": LOC_MANUAL,
+    "LOC_INTERNAL": LOC_INTERNAL,
+    "LOC_EXTERNAL": LOC_EXTERNAL,
+}
+
+
+def _normalize_location_source(val) -> Optional[int]:
+    """Normalise location_source to an int (0-3), accepting either the raw
+    protobuf integer or the enum string name produced by MessageToDict."""
+    if val is None:
+        return None
+    if isinstance(val, bool):  # bool is a subclass of int — reject it
+        return None
+    if isinstance(val, int):
+        return val
+    if isinstance(val, str):
+        return _LOCATION_SOURCE_NAMES.get(val)
+    return None
+
+
 @dataclass
 class Position:
     latitude: float
@@ -10,6 +44,13 @@ class Position:
     altitude: Optional[float] = None
     timestamp: Optional[int] = None   # unix epoch from the node
     received_at: float = field(default_factory=time.time)  # local time we got this position
+    # Position-quality fields — all optional, older firmware may omit them.
+    precision_bits: Optional[int] = None
+    location_source: Optional[int] = None  # one of the LOC_* constants
+    hdop: Optional[float] = None            # horizontal dilution of precision
+    sats_in_view: Optional[int] = None
+    fix_quality: Optional[int] = None       # 0=invalid, 1=GPS, 2=DGPS
+    fix_type: Optional[int] = None          # 0=none, 1=2D, 2=3D
 
     def age_seconds(self) -> float:
         return time.time() - self.received_at
@@ -23,13 +64,46 @@ class Position:
             f"?mlat={self.latitude}&mlon={self.longitude}&zoom=15"
         )
 
+    def precision_km(self) -> Optional[float]:
+        """Approximate horizontal resolution in kilometres, derived from
+        precision_bits (40000km / 2^bits).  None when precision_bits is unknown."""
+        if self.precision_bits is None:
+            return None
+        return 40000.0 / (2 ** self.precision_bits)
+
+    def is_approximate(self) -> bool:
+        """True when the position should not be trusted for precise navigation:
+        the source is unset/manual, or precision_bits indicates ~20km+ resolution."""
+        if self.location_source is not None and self.location_source <= LOC_MANUAL:
+            return True
+        if self.precision_bits is not None and self.precision_bits <= APPROX_PRECISION_BITS:
+            return True
+        return False
+
+    def quality_warning(self) -> Optional[str]:
+        """Human-readable warning about position unreliability, or None when
+        the position looks trustworthy."""
+        warnings: list[str] = []
+        if self.location_source == LOC_UNSET:
+            warnings.append("position source unknown — coordinates may be invalid")
+        elif self.location_source == LOC_MANUAL:
+            warnings.append("position is manually entered — may be approximate")
+        km = self.precision_km()
+        if km is not None and self.precision_bits <= APPROX_PRECISION_BITS:
+            warnings.append(f"low precision (~{km:.0f}km resolution, not a precise GPS fix)")
+        if self.sats_in_view is not None and self.sats_in_view < 4:
+            warnings.append(f"only {self.sats_in_view} satellites in view")
+        if not warnings:
+            return None
+        return "; ".join(warnings)
+
     def __str__(self) -> str:
         parts = [f"{self.latitude:.6f}, {self.longitude:.6f}"]
         if self.altitude is not None:
             parts.append(f"alt {self.altitude:.0f}m")
         age = self.age_seconds()
         if age > 60:
-            parts.append(f"(il y a {age / 60:.0f}min)")
+            parts.append(f"({age / 60:.0f}min ago)")
         return " | ".join(parts)
 
 
