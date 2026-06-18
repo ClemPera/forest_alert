@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.log
+config.toml
+.pytest_cache/
+.coverage
+htmlcov/
