@@ -13,6 +13,8 @@ User=pi
 Group=pi
 
 WorkingDirectory=/home/pi/forest_alert
+# .venv/ is created by `uv sync`.  Using the venv python directly avoids
+# spawning uv on every service restart.
 ExecStart=/home/pi/forest_alert/.venv/bin/python main.py /home/pi/forest_alert/config.toml
 Restart=always
 RestartSec=10

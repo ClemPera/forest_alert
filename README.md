@@ -36,11 +36,22 @@ packet = unknown portnum).
 
 ### 1. Python dependencies
 
+[uv](https://docs.astral.sh/uv/) manages the Python environment and
+dependencies.  Install it first:
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or via pip / pipx
+pipx install uv
+```
+
+Then clone and sync:
+
 ```bash
 cd ~/forest_alert
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync          # creates .venv/ and installs all dependencies
 ```
 
 ### 2. signal-cli
@@ -103,8 +114,7 @@ nano config.toml
 ### 6. Test before you leave
 
 ```bash
-source .venv/bin/activate
-python main.py
+uv run python main.py
 # Send "SOS" from the Meshtastic app → check Signal on the contact's phone
 # Send "CHECKIN" → check "💓 Heartbeat received" in the logs
 ```
@@ -144,7 +154,7 @@ journalctl -u forest_alert -f
 journalctl -u forest_alert -f
 
 # Check connection to the Meshtastic node
-python3 -c "
+uv run python -c "
 import meshtastic.tcp_interface
 i = meshtastic.tcp_interface.TCPInterface('192.168.1.XXX')
 print('Nodes:', list(i.nodes.keys()))
@@ -162,8 +172,8 @@ curl -X POST http://127.0.0.1:8080/api/v1/rpc \
 ## Running the tests
 
 ```bash
-pip install -r requirements-dev.txt
-pytest -v
+uv sync --group dev
+uv run pytest -v
 ```
 
 ---

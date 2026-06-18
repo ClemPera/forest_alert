@@ -1,7 +1,7 @@
 import pytest
 
 # Skip the whole module if the meshtastic package is not installed (e.g. a
-# minimal CI runner). When requirements.txt is installed these run for real.
+# minimal CI runner). When dev dependencies are installed these run for real.
 pytest.importorskip("meshtastic")
 
 from meshtastic_watcher import MeshtasticWatcher
