@@ -1,5 +1,3 @@
-import time
-
 from gps import (
     Position,
     _lat_lon_from_dict,

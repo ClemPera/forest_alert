@@ -1,6 +1,3 @@
-import time
-from pathlib import Path
-
 from state import load_last_heartbeat, save_last_heartbeat
 
 
