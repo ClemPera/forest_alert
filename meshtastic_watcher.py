@@ -8,6 +8,7 @@ from pubsub import pub
 
 from config import Config
 from gps import Position, extract_position_from_node, extract_position_from_packet
+from matching import contains_keyword, first_matching_keyword
 
 logger = logging.getLogger(__name__)
 
@@ -170,19 +171,19 @@ class MeshtasticWatcher:
 
         # Dead man's switch heartbeat check (takes priority over trigger keywords)
         dm_cfg = self._config.dead_man
-        if dm_cfg.enabled and dm_cfg.heartbeat_keyword.upper() in text.upper():
+        if dm_cfg.enabled and contains_keyword(text, dm_cfg.heartbeat_keyword):
             logger.info(f"💓 Heartbeat detected: '{text}'")
             if self.on_heartbeat:
                 self.on_heartbeat()
             return  # heartbeat never triggers an alert
 
-        # Emergency keyword check
-        for keyword in cfg.keywords:
-            if keyword.upper() in text.upper():
-                logger.warning(f"🆘 TRIGGER detected: '{keyword}' in '{text}'")
-                if self.on_trigger:
-                    self.on_trigger(keyword, text, position)
-                return  # first match is enough
+        # Emergency keyword check (whole-word match, first match wins)
+        keyword = first_matching_keyword(text, cfg.keywords)
+        if keyword:
+            logger.warning(f"🆘 TRIGGER detected: '{keyword}' in '{text}'")
+            if self.on_trigger:
+                self.on_trigger(keyword, text, position)
+            return  # first match is enough
 
     # ─── Position helpers ─────────────────────────────────────────────────
 
