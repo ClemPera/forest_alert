@@ -154,3 +154,135 @@ class TestPortnumFilter:
         w.on_trigger = lambda kw, msg, pos: captured.append(kw)
         w._handle_packet(text_packet("", portnum="TELEMETRY_APP"), FakeInterface())
         assert captured == []
+
+
+class TestPositionRefresh:
+    """Tests for on-demand position refresh on trigger."""
+
+    def test_fallback_when_no_send_position(self, make_config):
+        """FakeInterface has no sendPosition → trigger fires synchronously."""
+        w = MeshtasticWatcher(make_config(my_node_id="!abcdef01"))
+        captured = []
+        w.on_trigger = lambda kw, msg, pos: captured.append((kw, pos))
+        w._handle_packet(text_packet("SOS", from_id="!abcdef01"), FakeInterface())
+        assert len(captured) == 1
+        assert captured[0][0] == "SOS"
+
+    def test_fallback_when_no_my_node_id(self, make_config):
+        """Without my_node_id, can't request position → synchronous fallback."""
+        w = MeshtasticWatcher(make_config(my_node_id=None, require_from_my_node=False))
+        captured = []
+        w.on_trigger = lambda kw, msg, pos: captured.append(kw)
+        w._handle_packet(text_packet("SOS", from_id="!anyone"), FakeInterface())
+        assert captured == ["SOS"]
+
+    def test_refresh_uses_send_position(self, make_config):
+        """When sendPosition exists, it's called to refresh position."""
+        class RefreshInterface:
+            def __init__(self):
+                self.nodes = {
+                    "n1": {
+                        "user": {"id": "!abcdef01"},
+                        "position": {
+                            "latitudeI": 460000000,
+                            "longitudeI": 60000000,
+                            "locationSource": "LOC_INTERNAL",
+                            "precisionBits": 32,
+                        },
+                    }
+                }
+                self.send_called = False
+
+            def sendPosition(self, **kwargs):
+                self.send_called = True
+
+        w = MeshtasticWatcher(make_config(my_node_id="!abcdef01"))
+        captured = []
+        w.on_trigger = lambda kw, msg, pos: captured.append(pos)
+
+        iface = RefreshInterface()
+        w._handle_packet(text_packet("SOS", from_id="!abcdef01"), iface)
+
+        # Wait for the background thread
+        import time as _time
+        for _ in range(50):
+            if captured:
+                break
+            _time.sleep(0.01)
+
+        assert iface.send_called is True
+        assert len(captured) == 1
+        assert captured[0] is not None
+        assert captured[0].location_source == 2  # LOC_INTERNAL
+        assert captured[0].precision_bits == 32
+
+    def test_refresh_failure_falls_back(self, make_config):
+        """If sendPosition raises, we fall back to best_position."""
+        class FailingInterface:
+            def __init__(self):
+                self.nodes = {
+                    "n1": {
+                        "user": {"id": "!abcdef01"},
+                        "position": {"latitude": 1.0, "longitude": 2.0},
+                    }
+                }
+
+            def sendPosition(self, **kwargs):
+                raise Exception("timeout")
+
+        w = MeshtasticWatcher(make_config(my_node_id="!abcdef01"))
+        captured = []
+        w.on_trigger = lambda kw, msg, pos: captured.append(pos)
+
+        iface = FailingInterface()
+        w._handle_packet(text_packet("SOS", from_id="!abcdef01"), iface)
+
+        import time as _time
+        for _ in range(50):
+            if captured:
+                break
+            _time.sleep(0.01)
+
+        assert len(captured) == 1
+        assert captured[0] is not None
+        assert captured[0].latitude == 1.0
+
+    def test_refresh_cooldown_skips_second_request(self, make_config):
+        """After a refresh, subsequent triggers within cooldown skip refresh."""
+        class CountingInterface:
+            def __init__(self):
+                self.nodes = {
+                    "n1": {
+                        "user": {"id": "!abcdef01"},
+                        "position": {"latitude": 1.0, "longitude": 2.0,
+                                     "locationSource": "LOC_INTERNAL",
+                                     "precisionBits": 32},
+                    }
+                }
+                self.call_count = 0
+
+            def sendPosition(self, **kwargs):
+                self.call_count += 1
+
+        w = MeshtasticWatcher(make_config(my_node_id="!abcdef01"))
+        captured = []
+        w.on_trigger = lambda kw, msg, pos: captured.append(pos)
+
+        iface = CountingInterface()
+
+        # First trigger — should call sendPosition
+        w._handle_packet(text_packet("SOS", from_id="!abcdef01"), iface)
+        import time as _time
+        for _ in range(50):
+            if captured:
+                break
+            _time.sleep(0.01)
+        assert len(captured) == 1
+        assert iface.call_count == 1
+
+        # Second trigger immediately — should skip refresh (cooldown)
+        captured.clear()
+        w._handle_packet(text_packet("HELP", from_id="!abcdef01"), iface)
+        # Synchronous fallback since cooldown is active
+        assert len(captured) == 1
+        assert iface.call_count == 1  # still 1, no new sendPosition call

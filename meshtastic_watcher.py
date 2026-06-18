@@ -40,6 +40,10 @@ class MeshtasticWatcher:
         self._position_lock = threading.Lock()
         self._last_position: Optional[Position] = None
 
+        # Cooldown for on-demand position requests (the node rate-limits).
+        self._last_refresh_time: float = 0.0
+        self._refresh_cooldown: float = 30.0  # seconds
+
     # ─── Public API ───────────────────────────────────────────────────────
 
     def start(self):
@@ -174,9 +178,6 @@ class MeshtasticWatcher:
                 logger.debug(f"Ignored (not my node): from={from_id}")
                 return
 
-        # Get best available position for this node
-        position = self._best_position(from_id, packet, interface)
-
         # Dead man's switch heartbeat check (takes priority over trigger keywords)
         dm_cfg = self._config.dead_man
         if dm_cfg.enabled and contains_keyword(text, dm_cfg.heartbeat_keyword):
@@ -190,8 +191,110 @@ class MeshtasticWatcher:
         if keyword:
             logger.warning(f"🆘 TRIGGER detected: '{keyword}' in '{text}'")
             if self.on_trigger:
-                self.on_trigger(keyword, text, position)
+                self._dispatch_trigger(keyword, text, from_id, packet, interface)
             return  # first match is enough
+
+    # ─── Trigger dispatch ─────────────────────────────────────────────────
+
+    def _dispatch_trigger(
+        self,
+        keyword: str,
+        text: str,
+        from_id: str,
+        packet: dict,
+        interface,
+    ):
+        """Fire on_trigger with the freshest position available.
+
+        If the interface supports sendPosition (real Meshtastic connection),
+        we request a fresh position response from the local node to get
+        quality metadata (locationSource, precisionBits, etc.) that the
+        node DB entry lacks.  This runs in a separate thread so the
+        Meshtastic reader thread stays free to receive the response.
+        """
+        my_id = self._config.trigger.my_node_id
+        can_refresh = bool(
+            my_id
+            and interface
+            and hasattr(interface, "sendPosition")
+        )
+
+        if not can_refresh:
+            # No on-demand refresh possible (test interface or no my_node_id).
+            position = self._best_position(from_id, packet, interface)
+            self.on_trigger(keyword, text, position)
+            return
+
+        t = threading.Thread(
+            target=self._refresh_and_trigger,
+            args=(keyword, text, from_id, packet, interface, my_id),
+            daemon=True,
+            name="pos-refresh",
+        )
+        t.start()
+
+    def _refresh_and_trigger(
+        self,
+        keyword: str,
+        text: str,
+        from_id: str,
+        packet: dict,
+        interface,
+        my_id: str,
+    ):
+        """Refresh position from the local node, then fire on_trigger.
+
+        Runs in a background thread so the reader thread can process the
+        position response that sendPosition(wantResponse=True) triggers.
+        """
+        position = self._refresh_position(interface, my_id)
+        if position is None:
+            position = self._best_position(from_id, packet, interface)
+        self.on_trigger(keyword, text, position)
+
+    def _refresh_position(self, interface, my_id: str) -> Optional[Position]:
+        """Request a fresh position from the local node and return it.
+
+        The node DB entry for the local node is set directly by firmware
+        and lacks quality fields (locationSource, precisionBits, ...).
+        Calling sendPosition(wantResponse=True) makes the node respond
+        with a full Position protobuf that carries those fields.
+
+        Rate-limited: the node stops responding if we request too often,
+        so we enforce a cooldown between requests.
+        """
+        now = time.time()
+        elapsed = now - self._last_refresh_time
+        if elapsed < self._refresh_cooldown:
+            logger.debug(
+                "Position refresh skipped (cooldown: %.0fs remaining)",
+                self._refresh_cooldown - elapsed,
+            )
+            return None
+
+        self._last_refresh_time = now
+        try:
+            logger.info("Requesting fresh position from local node...")
+            interface.sendPosition(wantResponse=True, destinationId=my_id)
+
+            # The response has been processed by _onPositionReceive which
+            # updated the node DB.  Extract the refreshed position.
+            for node_info in interface.nodes.values():
+                node_id = node_info.get("user", {}).get("id", "")
+                if node_id.lower() == my_id.lower():
+                    pos = extract_position_from_node(node_info)
+                    if pos:
+                        with self._position_lock:
+                            self._last_position = pos
+                        logger.info(
+                            "Fresh position: %s | quality: %s",
+                            pos, pos.quality_description(),
+                        )
+                        return pos
+            logger.warning("Position refresh succeeded but no node DB entry found")
+        except Exception as e:
+            logger.warning(f"Position refresh failed: {e}")
+        return None
 
     # ─── Position helpers ─────────────────────────────────────────────────
 
