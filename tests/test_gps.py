@@ -140,6 +140,57 @@ class TestQualityWarning:
         assert ";" in w
 
 
+class TestQualityDescription:
+    def test_no_metadata_says_not_reported(self):
+        # Common case for local node DB entry: no quality fields at all.
+        p = Position(1.0, 2.0)
+        desc = p.quality_description()
+        assert "not reported" in desc
+
+    def test_internal_gps_with_good_precision(self):
+        p = Position(1.0, 2.0, location_source=LOC_INTERNAL,
+                     precision_bits=17, sats_in_view=8)
+        desc = p.quality_description()
+        assert "GPS fix" in desc
+        assert "internal GPS" in desc
+        assert "precision" in desc
+        assert "8 satellites" in desc
+
+    def test_external_gps(self):
+        p = Position(1.0, 2.0, location_source=LOC_EXTERNAL, precision_bits=17)
+        desc = p.quality_description()
+        assert "external GPS" in desc
+
+    def test_manual_source_returns_warning(self):
+        p = Position(1.0, 2.0, location_source=LOC_MANUAL)
+        desc = p.quality_description()
+        assert "manually entered" in desc
+
+    def test_unset_source_returns_warning(self):
+        p = Position(1.0, 2.0, location_source=LOC_UNSET)
+        desc = p.quality_description()
+        assert "source unknown" in desc
+
+    def test_low_precision_returns_warning(self):
+        p = Position(1.0, 2.0, precision_bits=11, location_source=LOC_INTERNAL)
+        desc = p.quality_description()
+        assert "low precision" in desc
+
+    def test_internal_gps_without_precision_bits(self):
+        # Common for remote nodes: locationSource present but no precisionBits.
+        p = Position(1.0, 2.0, location_source=LOC_INTERNAL)
+        desc = p.quality_description()
+        assert "GPS fix" in desc
+        assert "internal GPS" in desc
+        # Should NOT say "not reported" since we do have the source.
+        assert "not reported" not in desc
+
+    def test_full_precision_shows_meters(self):
+        p = Position(1.0, 2.0, location_source=LOC_INTERNAL, precision_bits=32)
+        desc = p.quality_description()
+        assert "m" in desc  # precision in metres, not km
+
+
 class TestNormalizeLocationSource:
     def test_int_passthrough(self):
         assert _normalize_location_source(2) == LOC_INTERNAL

@@ -13,6 +13,7 @@ class TestBuildMessage:
         assert "no heartbeat" in msg
         assert "google.com/maps" in msg
         assert "openstreetmap.org" in msg
+        assert "Quality" in msg  # quality line is always present
 
     def test_without_position(self):
         msg = build_message("SOS", "help", None)
@@ -49,11 +50,20 @@ class TestBuildMessage:
         assert "Approximate position" in msg
         assert "source unknown" in msg
 
-    def test_no_quality_warning_for_good_fix(self):
+    def test_good_fix_shows_positive_quality(self):
         p = Position(1.0, 2.0, precision_bits=17, location_source=LOC_INTERNAL,
                      sats_in_view=8)
         msg = build_message("SOS", "help", p)
         assert "Approximate position" not in msg
+        assert "Quality" in msg
+        assert "GPS fix" in msg
+
+    def test_no_metadata_shows_not_reported(self):
+        # Common for local node: no quality fields at all.
+        p = Position(1.0, 2.0)
+        msg = build_message("SOS", "help", p)
+        assert "Quality" in msg
+        assert "not reported" in msg
 
     def test_quality_warning_and_stale_can_coexist(self):
         p = Position(1.0, 2.0, precision_bits=8, location_source=LOC_MANUAL,

@@ -147,7 +147,15 @@ class MeshtasticWatcher:
             if pos:
                 with self._position_lock:
                     self._last_position = pos
-                logger.debug(f"Position updated: {pos}")
+                logger.debug(
+                    "Position packet received: %s | quality: %s",
+                    pos, pos.quality_description(),
+                )
+            else:
+                logger.debug(
+                    "Position packet without usable coordinates: %s",
+                    decoded.get("position", {}),
+                )
             return
 
         if portnum != _TEXT_PORT:
@@ -229,6 +237,13 @@ class MeshtasticWatcher:
             if pos:
                 with self._position_lock:
                     self._last_position = pos
-                logger.info(f"Initial position from node DB {node_id}: {pos}")
+                logger.info(
+                    "Initial position from node DB %s: %s | quality: %s",
+                    node_id, pos, pos.quality_description(),
+                )
+                logger.debug(
+                    "Raw position dict for %s: %s",
+                    node_id, node_info.get("position", {}),
+                )
                 if my_id:
                     break  # found the right node, stop

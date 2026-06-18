@@ -39,9 +39,11 @@ def build_message(trigger_type: str, trigger_msg: str, position: Optional[Positi
         age = position.age_seconds()
         if age > 3600:
             lines.append(f"⚠️  Stale position ({age / 3600:.1f}h old) — may be inaccurate")
-        quality = position.quality_warning()
-        if quality:
+        quality = position.quality_description()
+        if position.is_approximate():
             lines.append(f"⚠️  Approximate position — {quality}")
+        else:
+            lines.append(f"Quality  : {quality}")
     else:
         lines += [
             "⚠️  No GPS position available",

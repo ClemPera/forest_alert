@@ -97,6 +97,52 @@ class Position:
             return None
         return "; ".join(warnings)
 
+    def quality_description(self) -> str:
+        """Always returns a human-readable description of position quality.
+
+        - Warning text (prefixed with ⚠️ in the alert) when the position is
+          unreliable.
+        - A positive description ("GPS fix (internal GPS)") when we have
+          enough metadata to trust the coordinates.
+        - "Position quality not reported by node" when the node didn't
+          include any quality metadata (common for the local node's own
+          entry in the node DB).
+        """
+        warning = self.quality_warning()
+        if warning:
+            return warning
+
+        # No warnings — build a positive description from what we know.
+        source_names = {
+            LOC_INTERNAL: "internal GPS",
+            LOC_EXTERNAL: "external GPS",
+        }
+        parts: list[str] = []
+        if self.location_source in source_names:
+            parts.append(f"GPS fix ({source_names[self.location_source]})")
+        elif self.location_source == LOC_MANUAL:
+            parts.append("manually entered")
+        elif self.location_source == LOC_UNSET:
+            # quality_warning() already caught this, but just in case:
+            parts.append("source unknown")
+
+        km = self.precision_km()
+        if km is not None and self.precision_bits is not None:
+            if self.precision_bits >= 17:
+                parts.append(f"precision ~{km:.0f}m")
+            else:
+                parts.append(f"precision ~{km:.0f}km")
+
+        if self.sats_in_view is not None and self.sats_in_view >= 4:
+            parts.append(f"{self.sats_in_view} satellites")
+
+        if parts:
+            return " | ".join(parts)
+        # No quality metadata at all — this is common for the local node's
+        # position in the node DB, which is set directly by firmware without
+        # going through the protobuf decode path.
+        return "position quality not reported by node"
+
     def __str__(self) -> str:
         parts = [f"{self.latitude:.6f}, {self.longitude:.6f}"]
         if self.altitude is not None:
