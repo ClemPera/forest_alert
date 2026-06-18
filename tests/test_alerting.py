@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from alerting import build_message, fire_all, send_email, send_signal
-from gps import Position
+from gps import LOC_INTERNAL, LOC_MANUAL, LOC_UNSET, Position
 
 
 class TestBuildMessage:
@@ -29,6 +29,38 @@ class TestBuildMessage:
         p = Position(1.0, 2.0, received_at=0.0)
         msg = build_message("SOS", "help", p)
         assert "Stale position" in msg
+
+    def test_quality_warning_low_precision(self):
+        p = Position(1.0, 2.0, precision_bits=11, location_source=LOC_INTERNAL)
+        msg = build_message("SOS", "help", p)
+        assert "Approximate position" in msg
+        assert "low precision" in msg
+        assert "km" in msg
+
+    def test_quality_warning_manual_source(self):
+        p = Position(1.0, 2.0, location_source=LOC_MANUAL)
+        msg = build_message("SOS", "help", p)
+        assert "Approximate position" in msg
+        assert "manually entered" in msg
+
+    def test_quality_warning_unset_source(self):
+        p = Position(1.0, 2.0, location_source=LOC_UNSET)
+        msg = build_message("SOS", "help", p)
+        assert "Approximate position" in msg
+        assert "source unknown" in msg
+
+    def test_no_quality_warning_for_good_fix(self):
+        p = Position(1.0, 2.0, precision_bits=17, location_source=LOC_INTERNAL,
+                     sats_in_view=8)
+        msg = build_message("SOS", "help", p)
+        assert "Approximate position" not in msg
+
+    def test_quality_warning_and_stale_can_coexist(self):
+        p = Position(1.0, 2.0, precision_bits=8, location_source=LOC_MANUAL,
+                     received_at=0.0)
+        msg = build_message("SOS", "help", p)
+        assert "Stale position" in msg
+        assert "Approximate position" in msg
 
 
 class TestSendSignal:
