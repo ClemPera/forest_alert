@@ -127,6 +127,32 @@ def _lat_lon_from_dict(d: dict) -> Optional[tuple[float, float]]:
     return float(lat), float(lon)
 
 
+def _extract_quality_fields(pos_dict: dict) -> dict:
+    """Pull position-quality fields from a Meshtastic position dict.
+
+    The meshtastic Python library serialises protobuf via MessageToDict, so
+    field names are camelCase (precisionBits, locationSource, satsInView,
+    HDOP, fixQuality, fixType).  We also accept snake_case variants in case
+    the dict comes from a different source.
+    """
+    def _pick(*keys):
+        for k in keys:
+            if k in pos_dict and pos_dict[k] is not None:
+                return pos_dict[k]
+        return None
+
+    return {
+        "precision_bits": _pick("precisionBits", "precision_bits"),
+        "location_source": _normalize_location_source(
+            _pick("locationSource", "location_source")
+        ),
+        "hdop": _pick("HDOP", "hdop"),
+        "sats_in_view": _pick("satsInView", "sats_in_view"),
+        "fix_quality": _pick("fixQuality", "fix_quality"),
+        "fix_type": _pick("fixType", "fix_type"),
+    }
+
+
 def extract_position_from_node(node_info: dict) -> Optional[Position]:
     """Extract position from a Meshtastic node DB entry (interface.nodes[id])."""
     pos_dict = node_info.get("position")
@@ -144,6 +170,7 @@ def extract_position_from_node(node_info: dict) -> Optional[Position]:
         altitude=pos_dict.get("altitude"),
         timestamp=pos_dict.get("time"),
         received_at=time.time(),
+        **_extract_quality_fields(pos_dict),
     )
 
 
@@ -165,4 +192,5 @@ def extract_position_from_packet(packet: dict) -> Optional[Position]:
         altitude=pos_dict.get("altitude"),
         timestamp=pos_dict.get("time"),
         received_at=time.time(),
+        **_extract_quality_fields(pos_dict),
     )

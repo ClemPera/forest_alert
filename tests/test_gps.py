@@ -210,6 +210,45 @@ class TestExtractFromPacket:
         assert p.altitude == 55
         assert p.timestamp == 999
 
+    def test_extracts_camelcase_quality_fields(self):
+        pkt = self._packet(pos={
+            "latitude": 1.0, "longitude": 2.0,
+            "precisionBits": 11, "locationSource": "LOC_INTERNAL",
+            "HDOP": 5, "satsInView": 4, "fixQuality": 1, "fixType": 2,
+        })
+        p = extract_position_from_packet(pkt)
+        assert p is not None
+        assert p.precision_bits == 11
+        assert p.location_source == LOC_INTERNAL
+        assert p.hdop == 5
+        assert p.sats_in_view == 4
+        assert p.fix_quality == 1
+        assert p.fix_type == 2
+
+    def test_extracts_snake_case_quality_fields(self):
+        pkt = self._packet(pos={
+            "latitude": 1.0, "longitude": 2.0,
+            "precision_bits": 17, "location_source": "LOC_EXTERNAL",
+            "hdop": 2, "sats_in_view": 9,
+        })
+        p = extract_position_from_packet(pkt)
+        assert p is not None
+        assert p.precision_bits == 17
+        assert p.location_source == LOC_EXTERNAL
+        assert p.hdop == 2
+        assert p.sats_in_view == 9
+
+    def test_missing_quality_fields_default_none(self):
+        pkt = self._packet(pos={"latitude": 1.0, "longitude": 2.0})
+        p = extract_position_from_packet(pkt)
+        assert p is not None
+        assert p.precision_bits is None
+        assert p.location_source is None
+        assert p.hdop is None
+        assert p.sats_in_view is None
+        assert p.fix_quality is None
+        assert p.fix_type is None
+
 
 class TestExtractFromNode:
     def test_with_position(self):
@@ -229,3 +268,23 @@ class TestExtractFromNode:
     def test_zero_position(self):
         node = {"position": {"latitude": 0.0, "longitude": 0.0}}
         assert extract_position_from_node(node) is None
+
+    def test_extracts_quality_fields(self):
+        node = {"position": {
+            "latitude": 5.0, "longitude": 6.0,
+            "precisionBits": 11, "locationSource": "LOC_MANUAL",
+            "satsInView": 3,
+        }}
+        p = extract_position_from_node(node)
+        assert p is not None
+        assert p.precision_bits == 11
+        assert p.location_source == LOC_MANUAL
+        assert p.sats_in_view == 3
+        assert p.is_approximate() is True
+
+    def test_missing_quality_fields_default_none(self):
+        node = {"position": {"latitude": 5.0, "longitude": 6.0}}
+        p = extract_position_from_node(node)
+        assert p is not None
+        assert p.precision_bits is None
+        assert p.location_source is None
