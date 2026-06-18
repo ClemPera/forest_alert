@@ -1,67 +1,68 @@
 # ──────────────────────────────────────────────────────────────────────────
 # Forest Alert — config.toml
-# Copiez ce fichier en config.toml et remplissez les valeurs.
+# Copy this file to config.toml and fill in the values.
 # ──────────────────────────────────────────────────────────────────────────
 
 [meshtastic]
-# Adresse IP du T-Beam sur votre réseau local
+# IP address of the Meshtastic node on your local network
 host = "192.168.1.XXX"
-# Port TCP Meshtastic (4403 par défaut)
+# Meshtastic TCP port (4403 by default)
 port = 4403
-# Secondes avant de retenter la connexion si elle tombe
+# Seconds before retrying the connection if it drops
 reconnect_delay = 10
 
 
 [trigger]
-# Mots-clés qui déclenchent l'alerte (insensible à la casse)
+# Keywords that trigger an emergency alert (case-insensitive, whole-word match)
 keywords = ["HELP", "URGENCE", "SOS", "MAYDAY"]
 
-# ID de votre nœud M1 — trouvez-le dans l'app Meshtastic (ex: "!abcdef01")
+# ID of your source node — find it in the Meshtastic app (e.g. "!abcdef01")
 my_node_id = "!XXXXXXXX"
 
-# Si true, n'écoute que les messages venant de my_node_id
+# If true, only react to messages coming from my_node_id
 require_from_my_node = true
 
 
 [dead_man]
 enabled = true
 
-# Mot-clé à envoyer régulièrement pour signaler que tout va bien
-# NE DOIT PAS être dans [trigger].keywords !
-heartbeat_keyword = "OK"
+# Keyword to send regularly to signal that you are OK
+# Must NOT be in [trigger].keywords!
+# Pick something distinctive that won't appear in casual messages.
+heartbeat_keyword = "CHECKIN"
 
-# Fréquence attendue du heartbeat (heures)
+# Expected heartbeat frequency (hours)
 heartbeat_interval_hours = 4.0
 
-# Marge de tolérance avant l'alerte
+# Tolerance margin before alerting (hours)
 grace_period_hours = 1.0
 
-# Fréquence des vérifications internes (minutes)
+# Internal check frequency (minutes)
 check_interval_minutes = 15.0
 
 
 [signal]
-# URL du daemon signal-cli en mode HTTP JSON-RPC
-# Démarrez-le avec:
+# URL of the signal-cli daemon in HTTP JSON-RPC mode
+# Start it with:
 #   signal-cli -a +33XXXXXXXXX daemon --http=127.0.0.1:8080
 rpc_url = "http://127.0.0.1:8080/api/v1/rpc"
 
-# Numéros Signal à alerter (avec indicatif pays)
+# Signal phone numbers to alert (include country code)
 contacts = ["+33XXXXXXXXX"]
 
 
 [email]
-# Backup email (facultatif mais recommandé)
+# Backup email (optional but recommended)
 enabled = false
 smtp_host = "smtp.gmail.com"
 smtp_port = 587
-sender = "votre@gmail.com"
-# Pour Gmail: utilisez un App Password
+sender = "your@gmail.com"
+# For Gmail: use an App Password
 # https://myaccount.google.com/apppasswords
 password = "xxxx xxxx xxxx xxxx"
 recipients = ["contact@example.com"]
 
 
 [cooldown]
-# Délai minimum entre deux bursts d'alertes (secondes)
+# Minimum seconds between two alert bursts (prevents spam on repeated messages)
 seconds = 300

@@ -3,9 +3,10 @@
 Forest Alert — Emergency notification service for solo outdoor trips.
 
 Architecture:
-  MeshtasticWatcher  — TCP connection to T-Beam, decodes messages
-  DeadManSwitch      — fires alert if no heartbeat within configured interval
-  alerting.fire_all  — sends Signal + email in parallel
+  MeshtasticWatcher   — TCP connection to the Meshtastic node, decodes messages
+  DeadManSwitch       — fires alert if no heartbeat within configured interval
+  AlertDispatcher     — sends Signal + email off the receive thread
+  alerting.fire_all   — fans an alert out to all channels in parallel
 
 Usage:
   python main.py                  # uses ./config.toml
@@ -15,7 +16,6 @@ Usage:
 import logging
 import signal as _signal
 import sys
-import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Event
@@ -23,9 +23,9 @@ from typing import Optional
 
 import requests
 
-from alerting import fire_all
 from config import Config, load_config
 from deadman import DeadManSwitch
+from dispatcher import AlertDispatcher
 from gps import Position
 from meshtastic_watcher import MeshtasticWatcher
 
@@ -52,17 +52,17 @@ logger = logging.getLogger("forest_alert")
 # ─── App ────────────────────────────────────────────────────────────────────
 
 class ForestAlertApp:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, state_path: Optional[Path] = None):
         self._config = config
-        self._last_alert: float = 0.0
         self._shutdown = Event()
 
         self._watcher = MeshtasticWatcher(config)
-        self._dead_man = DeadManSwitch(config.dead_man, self._on_dead_man)
+        self._dispatcher = AlertDispatcher(config, self._watcher.get_last_position)
+        self._dead_man = DeadManSwitch(config.dead_man, self._on_dead_man, state_path)
 
         # Wire callbacks
         self._watcher.on_trigger   = self._on_trigger
-        self._watcher.on_heartbeat = self._dead_man.record_heartbeat
+        self._watcher.on_heartbeat = self._on_heartbeat
 
     # ─── Lifecycle ────────────────────────────────────────────────────────
 
@@ -73,47 +73,38 @@ class ForestAlertApp:
         for sig in (_signal.SIGINT, _signal.SIGTERM):
             _signal.signal(sig, self._handle_signal)
 
+        self._dispatcher.start()
         self._watcher.start()
         self._dead_man.start()
 
-        logger.info("🌲 Forest Alert en cours d'exécution — Ctrl+C pour arrêter")
+        logger.info("🌲 Forest Alert running — Ctrl+C to stop")
         self._shutdown.wait()
 
-        logger.info("Arrêt en cours…")
+        logger.info("Shutting down...")
         self._watcher.stop()
         self._dead_man.stop()
-        logger.info("Arrêt complet")
+        self._dispatcher.stop()
+        logger.info("Shutdown complete")
 
     def _handle_signal(self, sig, frame):
-        logger.info(f"Signal {sig} reçu, arrêt…")
+        logger.info(f"Signal {sig} received, shutting down...")
         self._shutdown.set()
 
-    # ─── Alert callbacks ──────────────────────────────────────────────────
+    # ─── Alert callbacks (non-blocking — just enqueue) ─────────────────────
 
     def _on_trigger(self, keyword: str, message: str, position: Optional[Position]):
-        if not self._check_cooldown("SOS trigger"):
-            return
-        pos = position or self._watcher.get_last_position()
-        logger.warning(f"🆘 ALERTE URGENCE — keyword='{keyword}' message='{message}'")
-        fire_all(self._config, f"SOS Meshtastic [{keyword}]", message, pos)
+        logger.warning(f"🆘 EMERGENCY ALERT — keyword='{keyword}' message='{message}'")
+        self._dispatcher.submit(f"SOS Meshtastic [{keyword}]", message, position)
+
+    def _on_heartbeat(self):
+        self._dead_man.record_heartbeat()
+        # A heartbeat means the user is alive — stop retrying any pending
+        # dead-man alert that may still be in flight.
+        self._dispatcher.cancel("Dead Man Switch")
 
     def _on_dead_man(self, reason: str):
-        if not self._check_cooldown("dead man switch"):
-            return
-        pos = self._watcher.get_last_position()
         logger.warning(f"💀 DEAD MAN SWITCH — {reason}")
-        fire_all(self._config, "Dead Man Switch", reason, pos)
-
-    def _check_cooldown(self, label: str) -> bool:
-        now = time.time()
-        remaining = self._config.cooldown.seconds - (now - self._last_alert)
-        if remaining > 0:
-            logger.warning(
-                f"Alerte '{label}' supprimée — cooldown actif ({remaining:.0f}s restantes)"
-            )
-            return False
-        self._last_alert = now
-        return True
+        self._dispatcher.submit("Dead Man Switch", reason)
 
     # ─── Preflight checks ─────────────────────────────────────────────────
 
@@ -121,11 +112,11 @@ class ForestAlertApp:
         ok = True
         cfg = self._config
 
-        logger.info("── Vérifications pré-démarrage ──────────────────")
+        logger.info("── Pre-flight checks ──────────────────")
 
         # Signal contacts
         if not cfg.signal.contacts:
-            logger.critical("❌ [signal] contacts est vide — les alertes Signal ne fonctionneront pas")
+            logger.critical("❌ [signal] contacts is empty — Signal alerts will not work")
             ok = False
 
         # signal-cli daemon
@@ -134,10 +125,12 @@ class ForestAlertApp:
 
         # Meshtastic node ID
         if cfg.trigger.require_from_my_node and not cfg.trigger.my_node_id:
-            logger.warning(
-                "⚠️  require_from_my_node=true mais my_node_id non défini "
-                "→ réagira aux messages de TOUS les nœuds"
+            logger.critical(
+                "❌ require_from_my_node=true but my_node_id is not set — "
+                "this is unsafe: ANY node on the mesh could trigger alerts. "
+                "Set my_node_id or set require_from_my_node=false in config.toml"
             )
+            ok = False
 
         # Dead man config sanity
         if cfg.dead_man.enabled:
@@ -147,8 +140,8 @@ class ForestAlertApp:
             )
             if overlap:
                 logger.critical(
-                    f"❌ Le keyword heartbeat '{cfg.dead_man.heartbeat_keyword}' "
-                    f"est aussi un keyword d'urgence — conflit, corrigez la config"
+                    f"❌ Heartbeat keyword '{cfg.dead_man.heartbeat_keyword}' "
+                    f"is also an emergency keyword — conflict, fix config"
                 )
                 ok = False
 
@@ -169,9 +162,9 @@ class ForestAlertApp:
             return True
         except Exception as e:
             logger.critical(
-                f"❌ signal-cli daemon injoignable à {self._config.signal.rpc_url}: {e}\n"
-                f"   Démarrez-le avec: "
-                f"signal-cli -a VOTRE_NUMERO daemon --http=127.0.0.1:8080"
+                f"❌ signal-cli daemon unreachable at {self._config.signal.rpc_url}: {e}\n"
+                f"   Start it with: "
+                f"signal-cli -a YOUR_NUMBER daemon --http=127.0.0.1:8080"
             )
             return False
 
@@ -185,18 +178,19 @@ def main():
 
     if not config_path.exists():
         print(
-            f"ERREUR: {config_path} introuvable.\n"
-            f"Copiez config.toml.example → config.toml et remplissez-le."
+            f"ERROR: {config_path} not found.\n"
+            f"Copy config.toml.example → config.toml and fill it in."
         )
         sys.exit(1)
 
     try:
         config = load_config(config_path)
     except Exception as e:
-        print(f"ERREUR config: {e}")
+        print(f"Config error: {e}")
         sys.exit(1)
 
-    ForestAlertApp(config).run()
+    state_path = config_path.parent / "forest_alert.state"
+    ForestAlertApp(config, state_path).run()
 
 
 if __name__ == "__main__":

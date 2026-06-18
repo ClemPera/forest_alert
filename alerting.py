@@ -3,6 +3,7 @@ import smtplib
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.mime.text import MIMEText
+from itertools import count
 from typing import Optional
 
 import requests
@@ -11,6 +12,10 @@ from config import Config
 from gps import Position
 
 logger = logging.getLogger(__name__)
+
+# Monotonic counter guarantees unique JSON-RPC ids even for alerts sent in
+# the same second (the previous time()-based id collided under burst load).
+_rpc_id_counter = count()
 
 
 # ─── Message builder ────────────────────────────────────────────────────────
@@ -21,7 +26,7 @@ def build_message(trigger_type: str, trigger_msg: str, position: Optional[Positi
         "🆘 FOREST ALERT 🆘",
         f"Type    : {trigger_type}",
         f"Message : {trigger_msg}",
-        f"Heure   : {ts}",
+        f"Time    : {ts}",
         "",
     ]
 
@@ -33,17 +38,13 @@ def build_message(trigger_type: str, trigger_msg: str, position: Optional[Positi
         ]
         age = position.age_seconds()
         if age > 3600:
-            lines.append(f"⚠️  Position ancienne ({age / 3600:.1f}h) — peut ne pas être exacte")
+            lines.append(f"⚠️  Stale position ({age / 3600:.1f}h old) — may be inaccurate")
     else:
         lines += [
-            "⚠️  Aucune position GPS disponible",
-            "    Vérifiez le dernier check-in connu",
+            "⚠️  No GPS position available",
+            "    Check the last known check-in",
         ]
 
-    lines += [
-        "",
-        "Contactez votre personne de confiance.",
-    ]
     return "\n".join(lines)
 
 
@@ -51,13 +52,13 @@ def build_message(trigger_type: str, trigger_msg: str, position: Optional[Positi
 
 def send_signal(config: Config, body: str) -> bool:
     if not config.signal.contacts:
-        logger.warning("Signal: aucun contact configuré, skip")
+        logger.warning("Signal: no contacts configured, skipping")
         return False
 
     payload = {
         "jsonrpc": "2.0",
         "method": "send",
-        "id": f"alert-{int(time.time())}",
+        "id": f"alert-{next(_rpc_id_counter)}",
         "params": {
             "message": body,
             "recipient": config.signal.contacts,
@@ -71,10 +72,10 @@ def send_signal(config: Config, body: str) -> bool:
         if "error" in data:
             logger.error(f"Signal RPC error: {data['error']}")
             return False
-        logger.info("✅ Signal envoyé")
+        logger.info("✅ Signal sent")
         return True
     except Exception as e:
-        logger.error(f"Signal échec: {e}")
+        logger.error(f"Signal failed: {e}")
         return False
 
 
@@ -95,10 +96,10 @@ def send_email(config: Config, body: str, subject: str) -> bool:
             s.starttls()
             s.login(config.email.sender, config.email.password)
             s.sendmail(config.email.sender, config.email.recipients, msg.as_string())
-        logger.info("✅ Email envoyé")
+        logger.info("✅ Email sent")
         return True
     except Exception as e:
-        logger.error(f"Email échec: {e}")
+        logger.error(f"Email failed: {e}")
         return False
 
 
@@ -127,18 +128,18 @@ def fire_all(
             try:
                 results[name] = future.result()
             except Exception as e:
-                logger.error(f"Channel '{name}' a levé une exception: {e}")
+                logger.error(f"Channel '{name}' raised an exception: {e}")
                 results[name] = False
 
     ok = [k for k, v in results.items() if v]
     fail = [k for k, v in results.items() if not v]
 
     if not ok:
-        logger.critical("💀 TOUS LES CANAUX D'ALERTE ONT ÉCHOUÉ — vérifiez les logs immédiatement")
+        logger.critical("💀 ALL ALERT CHANNELS FAILED — check logs immediately")
     else:
         logger.info(
-            f"Alertes envoyées via: {ok}"
-            + (f" | Échecs: {fail}" if fail else "")
+            f"Alerts sent via: {ok}"
+            + (f" | Failures: {fail}" if fail else "")
         )
 
     return results

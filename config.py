@@ -24,8 +24,9 @@ class TriggerConfig:
 @dataclass
 class DeadManConfig:
     enabled: bool = True
-    # Keyword you send regularly to reset the timer (case-insensitive)
-    heartbeat_keyword: str = "OK"
+    # Keyword you send regularly to reset the timer (case-insensitive, whole-word match).
+    # Pick something distinctive that won't appear in casual messages.
+    heartbeat_keyword: str = "CHECKIN"
     # How often you are expected to send a heartbeat
     heartbeat_interval_hours: float = 4.0
     # Extra buffer before alerting after missed heartbeat

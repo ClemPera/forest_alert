@@ -1,39 +1,40 @@
 # Forest Alert
 
-Service de surveillance d'urgence pour sorties en forêt seul.
+Emergency notification service for solo outdoor trips.
 
 ## Architecture
 
 ```
-Vous (M1 en forêt)
+You (in the field, with a Meshtastic node)
     │ LoRa mesh
     ▼
-T-Beam (base, WiFi maison)
+Base node (at home, on your local network)
     │ TCP port 4403
     ▼
-Raspberry Pi
-    ├── meshtastic_watcher.py  →  détecte les mots-clés + heartbeat
-    ├── deadman.py             →  alerte si plus de signe de vie
-    └── alerting.py            →  Signal + email en parallèle
+Host running Forest Alert
+    ├── meshtastic_watcher.py  →  detects keywords + heartbeat
+    ├── deadman.py             →  alerts if no sign of life
+    └── alerting.py            →  Signal + email in parallel
                                         │
                                         ▼
-                               Contact de confiance
+                               Trusted contact
 ```
 
-**Mots-clés d'urgence** : envoyez `HELP`, `SOS`, `URGENCE` ou `MAYDAY` depuis le M1.
-**Dead man's switch** : envoyez `OK` toutes les 4h. Silence = alerte automatique.
+**Emergency keywords**: send `HELP`, `SOS`, `URGENCE` or `MAYDAY` from your node.
+**Dead man's switch**: send `CHECKIN` every 4h. Silence = automatic alert.
 
-### Channels chiffrés
+### Encrypted channels
 
-Le T-Beam déchiffre les paquets avec les PSK de ses channels avant de les transmettre via TCP.
-Le service voit donc le texte en clair pour tous les channels dont le T-Beam a la clé.
-Les channels sans clé connue du T-Beam sont ignorés (paquet non déchiffré = portnum inconnu).
+The base node decrypts packets using the PSKs of its channels before forwarding
+them over TCP. The service therefore sees plaintext for every channel the base
+node has the key for. Channels without a known key are ignored (undecrypted
+packet = unknown portnum).
 
 ---
 
 ## Installation
 
-### 1. Dépendances Python
+### 1. Python dependencies
 
 ```bash
 cd ~/forest_alert
@@ -45,26 +46,26 @@ pip install -r requirements.txt
 ### 2. signal-cli
 
 ```bash
-# Téléchargez depuis https://github.com/AsamK/signal-cli/releases
-# signal-cli-x.y.z-Linux-aarch64.tar.gz pour RPi 64-bit
+# Download from https://github.com/AsamK/signal-cli/releases
+# Pick the build matching your host architecture.
 
 tar xzf signal-cli-*.tar.gz
 sudo mv signal-cli /usr/local/bin/
 signal-cli --version
 ```
 
-### 3. Lier signal-cli à votre compte Signal
+### 3. Link signal-cli to your Signal account
 
 ```bash
-# Lie le RPi comme appareil secondaire de votre compte existant
-signal-cli link -n "RPi-ForestAlert"
-# → Scannez le QR code dans Signal > Settings > Linked Devices > Link New Device
+# Link the host as a secondary device of your existing Signal account
+signal-cli link -n "ForestAlert"
+# → Scan the QR code in Signal > Settings > Linked Devices > Link New Device
 
 # Test
-signal-cli -a +33XXXXXXXXX send -m "Test depuis RPi" +33YYYYYYYYY
+signal-cli -a +33XXXXXXXXX send -m "Test from Forest Alert" +33YYYYYYYYY
 ```
 
-### 4. Démarrer signal-cli en daemon
+### 4. Start signal-cli as a daemon
 
 ```bash
 sudo nano /etc/systemd/system/signal-cli.service
@@ -96,61 +97,61 @@ sudo systemctl enable --now signal-cli
 ```bash
 cp config.toml.example config.toml
 nano config.toml
-# → Remplissez : [meshtastic] host, [trigger] my_node_id, [signal] contacts
+# → Fill in: [meshtastic] host, [trigger] my_node_id, [signal] contacts
 ```
 
-### 6. Test avant de partir
+### 6. Test before you leave
 
 ```bash
 source .venv/bin/activate
 python main.py
-# Envoyez "SOS" depuis l'app Meshtastic → vérifiez Signal chez le contact
-# Envoyez "OK" → vérifiez "💓 Heartbeat reçu" dans les logs
+# Send "SOS" from the Meshtastic app → check Signal on the contact's phone
+# Send "CHECKIN" → check "💓 Heartbeat received" in the logs
 ```
 
-### 7. Service systemd
+### 7. systemd service
 
 ```bash
 sudo cp forest_alert.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now forest_alert
 
-# Logs en temps réel
+# Live logs
 journalctl -u forest_alert -f
 ```
 
 ---
 
-## Utilisation terrain
+## Field usage
 
-| Action | Message à envoyer depuis M1 |
-|--------|------------------------------|
-| Je suis en vie | `OK` |
-| Urgence | `SOS` (ou `HELP`, `URGENCE`, `MAYDAY`) |
+| Action | Message to send from your node |
+|--------|----------------------------------|
+| I am alive | `CHECKIN` |
+| Emergency | `SOS` (or `HELP`, `URGENCE`, `MAYDAY`) |
 
-**Avant chaque sortie** :
-1. `systemctl status signal-cli forest_alert` → les deux `active`
-2. Envoyez un `SOS` de test → vérifiez que Signal sonne chez le contact
-3. Envoyez `OK` → vérifiez les logs
-4. Partagez votre itinéraire prévu avec le contact
+**Before every trip**:
+1. `systemctl status signal-cli forest_alert` → both `active`
+2. Send a test `SOS` → verify Signal rings on the contact's phone
+3. Send `CHECKIN` → verify the logs
+4. Share your planned itinerary with the contact
 
 ---
 
-## Dépannage
+## Troubleshooting
 
 ```bash
 # Logs
 journalctl -u forest_alert -f
 
-# Vérifier la connexion au T-Beam
+# Check connection to the Meshtastic node
 python3 -c "
 import meshtastic.tcp_interface
 i = meshtastic.tcp_interface.TCPInterface('192.168.1.XXX')
-print('Nœuds:', list(i.nodes.keys()))
+print('Nodes:', list(i.nodes.keys()))
 i.close()
 "
 
-# Tester signal-cli daemon
+# Test signal-cli daemon
 curl -X POST http://127.0.0.1:8080/api/v1/rpc \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","method":"version","id":"test"}'
@@ -158,8 +159,17 @@ curl -X POST http://127.0.0.1:8080/api/v1/rpc \
 
 ---
 
-## ⚠️ Limites
+## Running the tests
 
-- **Portée LoRa** : repérez les zones mortes sur votre itinéraire avant de partir
-- **Internet requis** : si la connexion du RPi tombe, aucune alerte ne passe
-- **Alimentation** : UPS recommandé sur le T-Beam + RPi
+```bash
+pip install -r requirements-dev.txt
+pytest -v
+```
+
+---
+
+## ⚠️ Limitations
+
+- **LoRa range**: scout your route for dead zones before you leave
+- **Internet required**: if the host loses connectivity, no alert goes out
+- **Power**: a UPS is recommended on the base node and host
