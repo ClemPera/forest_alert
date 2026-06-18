@@ -3,6 +3,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.python-version
 *.log
 config.toml
 .pytest_cache/

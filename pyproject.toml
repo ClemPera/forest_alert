@@ -1,3 +1,20 @@
+[project]
+name = "forest-alert"
+version = "0.1.0"
+description = "Emergency notification service for solo outdoor trips using Meshtastic LoRa mesh"
+requires-python = ">=3.11"
+dependencies = [
+    "meshtastic>=2.3.0",
+    "pypubsub>=4.0.3",
+    "requests>=2.31.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
