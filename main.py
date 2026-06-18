@@ -119,10 +119,12 @@ class ForestAlertApp:
 
         # Meshtastic node ID
         if cfg.trigger.require_from_my_node and not cfg.trigger.my_node_id:
-            logger.warning(
-                "⚠️  require_from_my_node=true but my_node_id is not set "
-                "→ will react to messages from ALL nodes"
+            logger.critical(
+                "❌ require_from_my_node=true but my_node_id is not set — "
+                "this is unsafe: ANY node on the mesh could trigger alerts. "
+                "Set my_node_id or set require_from_my_node=false in config.toml"
             )
+            ok = False
 
         # Dead man config sanity
         if cfg.dead_man.enabled:
