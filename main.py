@@ -52,13 +52,13 @@ logger = logging.getLogger("forest_alert")
 # ─── App ────────────────────────────────────────────────────────────────────
 
 class ForestAlertApp:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, state_path: Optional[Path] = None):
         self._config = config
         self._shutdown = Event()
 
         self._watcher = MeshtasticWatcher(config)
         self._dispatcher = AlertDispatcher(config, self._watcher.get_last_position)
-        self._dead_man = DeadManSwitch(config.dead_man, self._on_dead_man)
+        self._dead_man = DeadManSwitch(config.dead_man, self._on_dead_man, state_path)
 
         # Wire callbacks
         self._watcher.on_trigger   = self._on_trigger
@@ -181,7 +181,8 @@ def main():
         print(f"Config error: {e}")
         sys.exit(1)
 
-    ForestAlertApp(config).run()
+    state_path = config_path.parent / "forest_alert.state"
+    ForestAlertApp(config, state_path).run()
 
 
 if __name__ == "__main__":
