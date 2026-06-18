@@ -29,16 +29,16 @@ class DeadManSwitch:
 
     def start(self):
         if not self._config.enabled:
-            logger.info("Dead man's switch désactivé (config)")
+            logger.info("Dead man's switch disabled (config)")
             return
         self._running = True
         with self._lock:
             self._last_heartbeat = time.time()  # arm from now
         self._schedule_next_check()
         logger.info(
-            f"🔒 Dead man's switch armé — "
+            f"🔒 Dead man's switch armed — "
             f"keyword='{self._config.heartbeat_keyword}' "
-            f"intervalle={self._config.heartbeat_interval_hours}h "
+            f"interval={self._config.heartbeat_interval_hours}h "
             f"grace={self._config.grace_period_hours}h"
         )
 
@@ -53,7 +53,7 @@ class DeadManSwitch:
         with self._lock:
             self._last_heartbeat = time.time()
             self._already_fired = False
-        logger.info("💓 Heartbeat reçu — dead man's switch réinitialisé")
+        logger.info("💓 Heartbeat received — dead man's switch reset")
 
     # ─── Internal ─────────────────────────────────────────────────────────
 
@@ -88,19 +88,19 @@ class DeadManSwitch:
                     self._already_fired = True
                 hours = elapsed / 3600
                 reason = (
-                    f"Aucun signe de vie depuis {hours:.1f}h "
-                    f"(limite: {self._config.heartbeat_interval_hours + self._config.grace_period_hours}h). "
-                    f"Keyword attendu: '{self._config.heartbeat_keyword}'"
+                    f"No heartbeat since {hours:.1f}h "
+                    f"(limit: {self._config.heartbeat_interval_hours + self._config.grace_period_hours}h). "
+                    f"Expected keyword: '{self._config.heartbeat_keyword}'"
                 )
-                logger.warning(f"💀 Dead man's switch déclenché: {reason}")
+                logger.warning(f"💀 Dead man's switch triggered: {reason}")
                 self._on_alert(reason)
             else:
-                logger.debug("Dead man's switch déjà déclenché, pas de double alerte")
+                logger.debug("Dead man's switch already triggered, no duplicate alert")
         else:
             # Back in safe window (shouldn't happen without heartbeat, but reset just in case)
             with self._lock:
                 self._already_fired = False
             remaining = (max_secs - elapsed) / 3600
-            logger.debug(f"Dead man's switch OK — {remaining:.1f}h restantes")
+            logger.debug(f"Dead man's switch OK — {remaining:.1f}h remaining")
 
         self._schedule_next_check()

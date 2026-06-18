@@ -1,6 +1,5 @@
 [Unit]
 Description=Forest Alert — Meshtastic emergency notification service
-Documentation=https://github.com/yourname/forest-alert
 After=network-online.target
 Wants=network-online.target
 
@@ -9,6 +8,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# ↓ Change to your username and install path
 User=pi
 Group=pi
 

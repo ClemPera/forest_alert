@@ -3,7 +3,7 @@
 Forest Alert — Emergency notification service for solo outdoor trips.
 
 Architecture:
-  MeshtasticWatcher  — TCP connection to T-Beam, decodes messages
+  MeshtasticWatcher  — TCP connection to the Meshtastic node, decodes messages
   DeadManSwitch      — fires alert if no heartbeat within configured interval
   alerting.fire_all  — sends Signal + email in parallel
 
@@ -76,16 +76,16 @@ class ForestAlertApp:
         self._watcher.start()
         self._dead_man.start()
 
-        logger.info("🌲 Forest Alert en cours d'exécution — Ctrl+C pour arrêter")
+        logger.info("🌲 Forest Alert running — Ctrl+C to stop")
         self._shutdown.wait()
 
-        logger.info("Arrêt en cours…")
+        logger.info("Shutting down...")
         self._watcher.stop()
         self._dead_man.stop()
-        logger.info("Arrêt complet")
+        logger.info("Shutdown complete")
 
     def _handle_signal(self, sig, frame):
-        logger.info(f"Signal {sig} reçu, arrêt…")
+        logger.info(f"Signal {sig} received, shutting down...")
         self._shutdown.set()
 
     # ─── Alert callbacks ──────────────────────────────────────────────────
@@ -94,7 +94,7 @@ class ForestAlertApp:
         if not self._check_cooldown("SOS trigger"):
             return
         pos = position or self._watcher.get_last_position()
-        logger.warning(f"🆘 ALERTE URGENCE — keyword='{keyword}' message='{message}'")
+        logger.warning(f"🆘 EMERGENCY ALERT — keyword='{keyword}' message='{message}'")
         fire_all(self._config, f"SOS Meshtastic [{keyword}]", message, pos)
 
     def _on_dead_man(self, reason: str):
@@ -109,7 +109,7 @@ class ForestAlertApp:
         remaining = self._config.cooldown.seconds - (now - self._last_alert)
         if remaining > 0:
             logger.warning(
-                f"Alerte '{label}' supprimée — cooldown actif ({remaining:.0f}s restantes)"
+                f"Alert '{label}' suppressed — cooldown active ({remaining:.0f}s remaining)"
             )
             return False
         self._last_alert = now
@@ -121,11 +121,11 @@ class ForestAlertApp:
         ok = True
         cfg = self._config
 
-        logger.info("── Vérifications pré-démarrage ──────────────────")
+        logger.info("── Pre-flight checks ──────────────────")
 
         # Signal contacts
         if not cfg.signal.contacts:
-            logger.critical("❌ [signal] contacts est vide — les alertes Signal ne fonctionneront pas")
+            logger.critical("❌ [signal] contacts is empty — Signal alerts will not work")
             ok = False
 
         # signal-cli daemon
@@ -135,8 +135,8 @@ class ForestAlertApp:
         # Meshtastic node ID
         if cfg.trigger.require_from_my_node and not cfg.trigger.my_node_id:
             logger.warning(
-                "⚠️  require_from_my_node=true mais my_node_id non défini "
-                "→ réagira aux messages de TOUS les nœuds"
+                "⚠️  require_from_my_node=true but my_node_id is not set "
+                "→ will react to messages from ALL nodes"
             )
 
         # Dead man config sanity
@@ -147,8 +147,8 @@ class ForestAlertApp:
             )
             if overlap:
                 logger.critical(
-                    f"❌ Le keyword heartbeat '{cfg.dead_man.heartbeat_keyword}' "
-                    f"est aussi un keyword d'urgence — conflit, corrigez la config"
+                    f"❌ Heartbeat keyword '{cfg.dead_man.heartbeat_keyword}' "
+                    f"is also an emergency keyword — conflict, fix config"
                 )
                 ok = False
 
@@ -169,9 +169,9 @@ class ForestAlertApp:
             return True
         except Exception as e:
             logger.critical(
-                f"❌ signal-cli daemon injoignable à {self._config.signal.rpc_url}: {e}\n"
-                f"   Démarrez-le avec: "
-                f"signal-cli -a VOTRE_NUMERO daemon --http=127.0.0.1:8080"
+                f"❌ signal-cli daemon unreachable at {self._config.signal.rpc_url}: {e}\n"
+                f"   Start it with: "
+                f"signal-cli -a YOUR_NUMBER daemon --http=127.0.0.1:8080"
             )
             return False
 
@@ -185,15 +185,15 @@ def main():
 
     if not config_path.exists():
         print(
-            f"ERREUR: {config_path} introuvable.\n"
-            f"Copiez config.toml.example → config.toml et remplissez-le."
+            f"ERROR: {config_path} not found.\n"
+            f"Copy config.toml.example → config.toml and fill it in."
         )
         sys.exit(1)
 
     try:
         config = load_config(config_path)
     except Exception as e:
-        print(f"ERREUR config: {e}")
+        print(f"Config error: {e}")
         sys.exit(1)
 
     ForestAlertApp(config).run()

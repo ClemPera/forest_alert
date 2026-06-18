@@ -17,7 +17,7 @@ _POS_PORT = "POSITION_APP"
 
 class MeshtasticWatcher:
     """
-    Maintains a TCP connection to the T-Beam.
+    Maintains a TCP connection to the Meshtastic node.
     Reconnects automatically if the connection drops.
     Calls on_trigger(keyword, full_message, position) on emergency keyword.
     Calls on_heartbeat() on dead-man-switch heartbeat keyword.
@@ -47,7 +47,7 @@ class MeshtasticWatcher:
             target=self._connection_loop, daemon=True, name="mesh-watcher"
         )
         t.start()
-        logger.info("MeshtasticWatcher démarré")
+        logger.info("MeshtasticWatcher started")
 
     def stop(self):
         self._running = False
@@ -66,19 +66,19 @@ class MeshtasticWatcher:
             try:
                 self._connect_and_block()
             except Exception as e:
-                logger.error(f"Erreur de connexion Meshtastic: {e}")
+                logger.error(f"Meshtastic connection error: {e}")
             finally:
                 self._unsubscribe()
                 self._close_interface()
 
             if self._running:
                 delay = self._config.meshtastic.reconnect_delay
-                logger.info(f"Reconnexion dans {delay}s…")
+                logger.info(f"Reconnecting in {delay}s...")
                 time.sleep(delay)
 
     def _connect_and_block(self):
         cfg = self._config.meshtastic
-        logger.info(f"Connexion au T-Beam {cfg.host}:{cfg.port}…")
+        logger.info(f"Connecting to Meshtastic node {cfg.host}:{cfg.port}...")
 
         self._disconnected.clear()
         self._subscribe()
@@ -90,7 +90,7 @@ class MeshtasticWatcher:
 
         # Block here — _on_lost() will set this event when the link drops
         self._disconnected.wait()
-        logger.warning("Lien T-Beam perdu")
+        logger.warning("Meshtastic link lost")
 
     # ─── PubSub subscriptions ─────────────────────────────────────────────
 
@@ -122,7 +122,7 @@ class MeshtasticWatcher:
     # ─── PubSub callbacks (called from the Meshtastic thread) ─────────────
 
     def _on_connected(self, interface, topic=pub.AUTO_TOPIC):
-        logger.info("✓ Connecté au T-Beam")
+        logger.info("✓ Connected to Meshtastic node")
         self._seed_position_from_db(interface)
 
     def _on_lost(self, interface, topic=pub.AUTO_TOPIC):
@@ -132,7 +132,7 @@ class MeshtasticWatcher:
         try:
             self._handle_packet(packet, interface)
         except Exception as e:
-            logger.error(f"Erreur traitement paquet: {e}", exc_info=True)
+            logger.error(f"Error processing packet: {e}", exc_info=True)
 
     # ─── Packet handling ──────────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ class MeshtasticWatcher:
             if pos:
                 with self._position_lock:
                     self._last_position = pos
-                logger.debug(f"Position mise à jour: {pos}")
+                logger.debug(f"Position updated: {pos}")
             return
 
         if portnum != _TEXT_PORT:
@@ -156,13 +156,13 @@ class MeshtasticWatcher:
         from_id: str = packet.get("fromId", "")
         to_id: str = packet.get("toId", "")
 
-        logger.info(f"Message reçu — from={from_id} to={to_id} : '{text}'")
+        logger.info(f"Message received — from={from_id} to={to_id} : '{text}'")
 
         # Filter by source node if configured
         cfg = self._config.trigger
         if cfg.require_from_my_node and cfg.my_node_id:
             if from_id.lower() != cfg.my_node_id.lower():
-                logger.debug(f"Ignoré (pas mon nœud): from={from_id}")
+                logger.debug(f"Ignored (not my node): from={from_id}")
                 return
 
         # Get best available position for this node
@@ -171,7 +171,7 @@ class MeshtasticWatcher:
         # Dead man's switch heartbeat check (takes priority over trigger keywords)
         dm_cfg = self._config.dead_man
         if dm_cfg.enabled and dm_cfg.heartbeat_keyword.upper() in text.upper():
-            logger.info(f"💓 Heartbeat détecté: '{text}'")
+            logger.info(f"💓 Heartbeat detected: '{text}'")
             if self.on_heartbeat:
                 self.on_heartbeat()
             return  # heartbeat never triggers an alert
@@ -179,7 +179,7 @@ class MeshtasticWatcher:
         # Emergency keyword check
         for keyword in cfg.keywords:
             if keyword.upper() in text.upper():
-                logger.warning(f"🆘 TRIGGER détecté: '{keyword}' dans '{text}'")
+                logger.warning(f"🆘 TRIGGER detected: '{keyword}' in '{text}'")
                 if self.on_trigger:
                     self.on_trigger(keyword, text, position)
                 return  # first match is enough
@@ -214,7 +214,7 @@ class MeshtasticWatcher:
             return self._last_position
 
     def _seed_position_from_db(self, interface):
-        """On connection, populate last_position from node DB (especially for M1)."""
+        """On connection, populate last_position from node DB (especially for the source node)."""
         if not interface or not interface.nodes:
             return
 
@@ -228,6 +228,6 @@ class MeshtasticWatcher:
             if pos:
                 with self._position_lock:
                     self._last_position = pos
-                logger.info(f"Position initiale depuis DB nœud {node_id}: {pos}")
+                logger.info(f"Initial position from node DB {node_id}: {pos}")
                 if my_id:
                     break  # found the right node, stop
