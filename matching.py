@@ -15,13 +15,19 @@ def _pattern_for(keyword: str) -> re.Pattern:
 
 
 def contains_keyword(text: str, keyword: str) -> bool:
-    """Return True if `keyword` appears in `text` as a whole word (case-insensitive)."""
+    """Return True if `keyword` appears in `text` as a whole word (case-insensitive).
+
+    An empty keyword never matches — this avoids a misconfigured empty keyword
+    silently matching at every word boundary.
+    """
+    if not keyword:
+        return False
     return _pattern_for(keyword).search(text) is not None
 
 
 def first_matching_keyword(text: str, keywords: list[str]) -> str | None:
     """Return the first keyword that appears in `text` as a whole word, or None."""
     for kw in keywords:
-        if contains_keyword(text, kw):
+        if kw and contains_keyword(text, kw):
             return kw
     return None
