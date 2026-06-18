@@ -1,0 +1,67 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Forest Alert — config.toml
+# Copiez ce fichier en config.toml et remplissez les valeurs.
+# ──────────────────────────────────────────────────────────────────────────
+
+[meshtastic]
+# Adresse IP du T-Beam sur votre réseau local
+host = "192.168.1.XXX"
+# Port TCP Meshtastic (4403 par défaut)
+port = 4403
+# Secondes avant de retenter la connexion si elle tombe
+reconnect_delay = 10
+
+
+[trigger]
+# Mots-clés qui déclenchent l'alerte (insensible à la casse)
+keywords = ["HELP", "URGENCE", "SOS", "MAYDAY"]
+
+# ID de votre nœud M1 — trouvez-le dans l'app Meshtastic (ex: "!abcdef01")
+my_node_id = "!XXXXXXXX"
+
+# Si true, n'écoute que les messages venant de my_node_id
+require_from_my_node = true
+
+
+[dead_man]
+enabled = true
+
+# Mot-clé à envoyer régulièrement pour signaler que tout va bien
+# NE DOIT PAS être dans [trigger].keywords !
+heartbeat_keyword = "OK"
+
+# Fréquence attendue du heartbeat (heures)
+heartbeat_interval_hours = 4.0
+
+# Marge de tolérance avant l'alerte
+grace_period_hours = 1.0
+
+# Fréquence des vérifications internes (minutes)
+check_interval_minutes = 15.0
+
+
+[signal]
+# URL du daemon signal-cli en mode HTTP JSON-RPC
+# Démarrez-le avec:
+#   signal-cli -a +33XXXXXXXXX daemon --http=127.0.0.1:8080
+rpc_url = "http://127.0.0.1:8080/api/v1/rpc"
+
+# Numéros Signal à alerter (avec indicatif pays)
+contacts = ["+33XXXXXXXXX"]
+
+
+[email]
+# Backup email (facultatif mais recommandé)
+enabled = false
+smtp_host = "smtp.gmail.com"
+smtp_port = 587
+sender = "votre@gmail.com"
+# Pour Gmail: utilisez un App Password
+# https://myaccount.google.com/apppasswords
+password = "xxxx xxxx xxxx xxxx"
+recipients = ["contact@example.com"]
+
+
+[cooldown]
+# Délai minimum entre deux bursts d'alertes (secondes)
+seconds = 300
