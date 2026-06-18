@@ -3,9 +3,10 @@
 Forest Alert — Emergency notification service for solo outdoor trips.
 
 Architecture:
-  MeshtasticWatcher  — TCP connection to the Meshtastic node, decodes messages
-  DeadManSwitch      — fires alert if no heartbeat within configured interval
-  alerting.fire_all  — sends Signal + email in parallel
+  MeshtasticWatcher   — TCP connection to the Meshtastic node, decodes messages
+  DeadManSwitch       — fires alert if no heartbeat within configured interval
+  AlertDispatcher     — sends Signal + email off the receive thread
+  alerting.fire_all   — fans an alert out to all channels in parallel
 
 Usage:
   python main.py                  # uses ./config.toml
@@ -15,7 +16,6 @@ Usage:
 import logging
 import signal as _signal
 import sys
-import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Event
@@ -23,9 +23,9 @@ from typing import Optional
 
 import requests
 
-from alerting import fire_all
 from config import Config, load_config
 from deadman import DeadManSwitch
+from dispatcher import AlertDispatcher
 from gps import Position
 from meshtastic_watcher import MeshtasticWatcher
 
@@ -54,10 +54,10 @@ logger = logging.getLogger("forest_alert")
 class ForestAlertApp:
     def __init__(self, config: Config):
         self._config = config
-        self._last_alert: float = 0.0
         self._shutdown = Event()
 
         self._watcher = MeshtasticWatcher(config)
+        self._dispatcher = AlertDispatcher(config, self._watcher.get_last_position)
         self._dead_man = DeadManSwitch(config.dead_man, self._on_dead_man)
 
         # Wire callbacks
@@ -73,6 +73,7 @@ class ForestAlertApp:
         for sig in (_signal.SIGINT, _signal.SIGTERM):
             _signal.signal(sig, self._handle_signal)
 
+        self._dispatcher.start()
         self._watcher.start()
         self._dead_man.start()
 
@@ -82,38 +83,22 @@ class ForestAlertApp:
         logger.info("Shutting down...")
         self._watcher.stop()
         self._dead_man.stop()
+        self._dispatcher.stop()
         logger.info("Shutdown complete")
 
     def _handle_signal(self, sig, frame):
         logger.info(f"Signal {sig} received, shutting down...")
         self._shutdown.set()
 
-    # ─── Alert callbacks ──────────────────────────────────────────────────
+    # ─── Alert callbacks (non-blocking — just enqueue) ─────────────────────
 
     def _on_trigger(self, keyword: str, message: str, position: Optional[Position]):
-        if not self._check_cooldown("SOS trigger"):
-            return
-        pos = position or self._watcher.get_last_position()
         logger.warning(f"🆘 EMERGENCY ALERT — keyword='{keyword}' message='{message}'")
-        fire_all(self._config, f"SOS Meshtastic [{keyword}]", message, pos)
+        self._dispatcher.submit(f"SOS Meshtastic [{keyword}]", message, position)
 
     def _on_dead_man(self, reason: str):
-        if not self._check_cooldown("dead man switch"):
-            return
-        pos = self._watcher.get_last_position()
         logger.warning(f"💀 DEAD MAN SWITCH — {reason}")
-        fire_all(self._config, "Dead Man Switch", reason, pos)
-
-    def _check_cooldown(self, label: str) -> bool:
-        now = time.time()
-        remaining = self._config.cooldown.seconds - (now - self._last_alert)
-        if remaining > 0:
-            logger.warning(
-                f"Alert '{label}' suppressed — cooldown active ({remaining:.0f}s remaining)"
-            )
-            return False
-        self._last_alert = now
-        return True
+        self._dispatcher.submit("Dead Man Switch", reason)
 
     # ─── Preflight checks ─────────────────────────────────────────────────
 
