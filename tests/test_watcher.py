@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 # Skip the whole module if the meshtastic package is not installed (e.g. a
@@ -154,3 +156,29 @@ class TestPortnumFilter:
         w.on_trigger = lambda kw, msg, pos: captured.append(kw)
         w._handle_packet(text_packet("", portnum="TELEMETRY_APP"), FakeInterface())
         assert captured == []
+
+
+class TestReconnectBackoff:
+    def test_first_failure_uses_base_delay(self, make_config):
+        w = MeshtasticWatcher(make_config())
+        assert w._next_reconnect_delay() == 10
+
+    def test_flapping_doubles_delay_each_time(self, make_config):
+        w = MeshtasticWatcher(make_config())
+        assert w._next_reconnect_delay() == 10
+        assert w._next_reconnect_delay() == 20
+        assert w._next_reconnect_delay() == 40
+
+    def test_delay_caps_at_max(self, make_config):
+        w = MeshtasticWatcher(make_config())
+        for _ in range(10):
+            delay = w._next_reconnect_delay()
+        assert delay == 300
+
+    def test_healthy_connection_resets_backoff(self, make_config):
+        w = MeshtasticWatcher(make_config())
+        w._next_reconnect_delay()
+        w._next_reconnect_delay()
+        # Simulate a connection that stayed up past the flap window.
+        w._connected_at = time.time() - 61
+        assert w._next_reconnect_delay() == 10
