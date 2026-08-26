@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 _TEXT_PORT = "TEXT_MESSAGE_APP"
 _POS_PORT = "POSITION_APP"
 
+# A connection that survives this long is considered healthy and resets the
+# reconnect backoff. Anything shorter is a "flap" and doubles the delay.
+_FLAP_WINDOW = 60
+_MAX_RECONNECT_DELAY = 300
+
 
 class MeshtasticWatcher:
     """
@@ -39,6 +44,10 @@ class MeshtasticWatcher:
 
         self._position_lock = threading.Lock()
         self._last_position: Optional[Position] = None
+
+        # Reconnect backoff state (see _next_reconnect_delay)
+        self._connected_at: Optional[float] = None
+        self._consecutive_flaps = 0
 
     # ─── Public API ───────────────────────────────────────────────────────
 
@@ -73,9 +82,26 @@ class MeshtasticWatcher:
                 self._close_interface()
 
             if self._running:
-                delay = self._config.meshtastic.reconnect_delay
+                delay = self._next_reconnect_delay()
                 logger.info(f"Reconnecting in {delay}s...")
                 time.sleep(delay)
+
+    def _next_reconnect_delay(self) -> float:
+        """Base delay after a healthy connection, doubling (capped) on flaps."""
+        base = self._config.meshtastic.reconnect_delay
+        was_healthy = (
+            self._connected_at is not None
+            and time.time() - self._connected_at >= _FLAP_WINDOW
+        )
+        self._connected_at = None
+
+        if was_healthy:
+            self._consecutive_flaps = 0
+            return base
+
+        self._consecutive_flaps += 1
+        delay = base * (2 ** (self._consecutive_flaps - 1))
+        return min(delay, _MAX_RECONNECT_DELAY)
 
     def _connect_and_block(self):
         cfg = self._config.meshtastic
@@ -84,9 +110,16 @@ class MeshtasticWatcher:
         self._disconnected.clear()
         self._subscribe()
 
+        # noNodes=True skips the full node-DB dump on (re)connect. The base
+        # node's TCP API server is limited hardware — repeatedly dumping the
+        # whole node table (including on the library's own silent internal
+        # reconnects after a dropped socket) overloads it and can crash it.
+        # We don't need the bulk dump anyway: positions come from the packet
+        # itself first, then live node updates, then the local cache.
         self._interface = meshtastic.tcp_interface.TCPInterface(
             hostname=cfg.host,
             portNumber=cfg.port,
+            noNodes=True,
         )
 
         # Block here — _on_lost() will set this event when the link drops
@@ -124,6 +157,7 @@ class MeshtasticWatcher:
 
     def _on_connected(self, interface, topic=pub.AUTO_TOPIC):
         logger.info("✓ Connected to Meshtastic node")
+        self._connected_at = time.time()
         self._seed_position_from_db(interface)
 
     def _on_lost(self, interface, topic=pub.AUTO_TOPIC):
