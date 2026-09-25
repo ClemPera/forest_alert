@@ -1,6 +1,7 @@
 from gps import (
     Position,
     _lat_lon_from_dict,
+    extract_position_from_contact,
     extract_position_from_node,
     extract_position_from_packet,
 )
@@ -110,3 +111,21 @@ class TestExtractFromNode:
     def test_zero_position(self):
         node = {"position": {"latitude": 0.0, "longitude": 0.0}}
         assert extract_position_from_node(node) is None
+
+
+class TestExtractFromContact:
+    def test_with_position(self):
+        contact = {"adv_lat": 5.0, "adv_lon": 6.0, "last_advert": 123}
+        p = extract_position_from_contact(contact)
+        assert p is not None
+        assert p.latitude == 5.0
+        assert p.longitude == 6.0
+        assert p.timestamp == 123
+
+    def test_none_contact_returns_none(self):
+        assert extract_position_from_contact(None) is None
+        assert extract_position_from_contact({}) is None
+
+    def test_unset_position_returns_none(self):
+        contact = {"adv_lat": 0.0, "adv_lon": 0.0}
+        assert extract_position_from_contact(contact) is None

@@ -77,3 +77,46 @@ class TestLoadConfig:
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             load_config(tmp_path / "nonexistent.toml")
+
+
+class TestTransportSelection:
+    def test_default_transport_is_meshtastic(self, tmp_path):
+        p = write_config(tmp_path, """
+            [meshtastic]
+            host = "10.0.0.1"
+        """)
+        cfg = load_config(p)
+        assert cfg.transport.type == "meshtastic"
+        assert cfg.meshcore is None
+
+    def test_meshcore_transport_requires_host(self, tmp_path):
+        p = write_config(tmp_path, """
+            [transport]
+            type = "meshcore"
+        """)
+        with pytest.raises(ValueError, match="host"):
+            load_config(p)
+
+    def test_meshcore_transport_loads(self, tmp_path):
+        p = write_config(tmp_path, """
+            [transport]
+            type = "meshcore"
+
+            [meshcore]
+            host = "192.168.1.20"
+            contact_public_key = "aabbccdd"
+        """)
+        cfg = load_config(p)
+        assert cfg.transport.type == "meshcore"
+        assert cfg.meshtastic is None
+        assert cfg.meshcore.host == "192.168.1.20"
+        assert cfg.meshcore.port == 4000
+        assert cfg.meshcore.contact_public_key == "aabbccdd"
+
+    def test_unknown_transport_type_raises(self, tmp_path):
+        p = write_config(tmp_path, """
+            [transport]
+            type = "carrier_pigeon"
+        """)
+        with pytest.raises(ValueError, match="Unknown"):
+            load_config(p)
