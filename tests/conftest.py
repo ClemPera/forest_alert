@@ -7,8 +7,10 @@ from config import (
     CooldownConfig,
     DeadManConfig,
     EmailConfig,
+    MeshCoreConfig,
     MeshtasticConfig,
     SignalConfig,
+    TransportConfig,
     TriggerConfig,
 )
 
@@ -27,9 +29,13 @@ def make_config():
         email_enabled=False,
         email_recipients=None,
         signal_contacts=None,
+        transport_type="meshtastic",
+        contact_public_key=None,
     ):
         return Config(
+            transport=TransportConfig(type=transport_type),
             meshtastic=MeshtasticConfig(host="test"),
+            meshcore=MeshCoreConfig(host="test", contact_public_key=contact_public_key),
             trigger=TriggerConfig(
                 keywords=keywords or ["HELP", "URGENCE", "SOS", "MAYDAY"],
                 my_node_id=my_node_id,

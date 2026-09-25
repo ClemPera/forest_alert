@@ -6,7 +6,7 @@ import pytest
 # minimal CI runner). When dev dependencies are installed these run for real.
 pytest.importorskip("meshtastic")
 
-from meshtastic_watcher import MeshtasticWatcher
+from watchers.meshtastic import MeshtasticWatcher
 
 
 def text_packet(text, from_id="!abcdef01", to_id="^all", portnum="TEXT_MESSAGE_APP"):

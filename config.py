@@ -12,6 +12,21 @@ class MeshtasticConfig:
 
 
 @dataclass
+class MeshCoreConfig:
+    host: str
+    port: int = 4000
+    reconnect_delay: int = 10  # seconds between reconnection attempts
+    # Public key (hex) of the paired contact allowed to trigger alerts.
+    # Required when [trigger].require_from_my_node is true.
+    contact_public_key: Optional[str] = None
+
+
+@dataclass
+class TransportConfig:
+    type: str = "meshtastic"  # "meshtastic" or "meshcore" — which watcher to run
+
+
+@dataclass
 class TriggerConfig:
     # Keywords that trigger an emergency alert (case-insensitive)
     keywords: list[str] = field(default_factory=lambda: ["HELP", "URGENCE", "SOS", "MAYDAY"])
@@ -62,24 +77,45 @@ class CooldownConfig:
 
 @dataclass
 class Config:
-    meshtastic: MeshtasticConfig
     trigger: TriggerConfig
     dead_man: DeadManConfig
     signal: SignalConfig
     email: EmailConfig
     cooldown: CooldownConfig
+    transport: TransportConfig = field(default_factory=TransportConfig)
+    # Exactly one of these is set, matching transport.type
+    meshtastic: Optional[MeshtasticConfig] = None
+    meshcore: Optional[MeshCoreConfig] = None
 
 
 def load_config(path: Path = Path("config.toml")) -> Config:
     with open(path, "rb") as f:
         raw = tomllib.load(f)
 
-    mesh_raw = raw.get("meshtastic", {})
-    if "host" not in mesh_raw:
-        raise ValueError("[meshtastic] host is required in config.toml")
+    transport = TransportConfig(**raw.get("transport", {}))
+
+    meshtastic_cfg = None
+    meshcore_cfg = None
+
+    if transport.type == "meshtastic":
+        mesh_raw = raw.get("meshtastic", {})
+        if "host" not in mesh_raw:
+            raise ValueError("[meshtastic] host is required in config.toml")
+        meshtastic_cfg = MeshtasticConfig(**mesh_raw)
+    elif transport.type == "meshcore":
+        mc_raw = raw.get("meshcore", {})
+        if "host" not in mc_raw:
+            raise ValueError("[meshcore] host is required in config.toml")
+        meshcore_cfg = MeshCoreConfig(**mc_raw)
+    else:
+        raise ValueError(
+            f"Unknown [transport] type '{transport.type}' — expected 'meshtastic' or 'meshcore'"
+        )
 
     return Config(
-        meshtastic=MeshtasticConfig(**mesh_raw),
+        transport=transport,
+        meshtastic=meshtastic_cfg,
+        meshcore=meshcore_cfg,
         trigger=TriggerConfig(**raw.get("trigger", {})),
         dead_man=DeadManConfig(**raw.get("dead_man", {})),
         signal=SignalConfig(**raw.get("signal", {})),

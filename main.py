@@ -3,7 +3,8 @@
 Forest Alert — Emergency notification service for solo outdoor trips.
 
 Architecture:
-  MeshtasticWatcher   — TCP connection to the Meshtastic node, decodes messages
+  MeshtasticWatcher / MeshCoreWatcher — connects to the mesh node, decodes
+                        messages; transport picked by [transport].type
   DeadManSwitch       — fires alert if no heartbeat within configured interval
   AlertDispatcher     — sends Signal + email off the receive thread
   alerting.fire_all   — fans an alert out to all channels in parallel
@@ -27,7 +28,8 @@ from config import Config, load_config
 from deadman import DeadManSwitch
 from dispatcher import AlertDispatcher
 from gps import Position
-from meshtastic_watcher import MeshtasticWatcher
+from watchers.meshcore import MeshCoreWatcher
+from watchers.meshtastic import MeshtasticWatcher
 
 
 # ─── Logging ────────────────────────────────────────────────────────────────
@@ -56,7 +58,8 @@ class ForestAlertApp:
         self._config = config
         self._shutdown = Event()
 
-        self._watcher = MeshtasticWatcher(config)
+        watcher_cls = MeshCoreWatcher if config.transport.type == "meshcore" else MeshtasticWatcher
+        self._watcher = watcher_cls(config)
         self._dispatcher = AlertDispatcher(config, self._watcher.get_last_position)
         self._dead_man = DeadManSwitch(config.dead_man, self._on_dead_man, state_path)
 
@@ -123,14 +126,24 @@ class ForestAlertApp:
         if not self._ping_signal_daemon():
             ok = False
 
-        # Meshtastic node ID
-        if cfg.trigger.require_from_my_node and not cfg.trigger.my_node_id:
-            logger.critical(
-                "❌ require_from_my_node=true but my_node_id is not set — "
-                "this is unsafe: ANY node on the mesh could trigger alerts. "
-                "Set my_node_id or set require_from_my_node=false in config.toml"
-            )
-            ok = False
+        # Source filter — the field lives in [meshtastic] or [meshcore]
+        # depending on transport, since the two identity formats don't match
+        if cfg.trigger.require_from_my_node:
+            if cfg.transport.type == "meshcore":
+                if not (cfg.meshcore and cfg.meshcore.contact_public_key):
+                    logger.critical(
+                        "❌ require_from_my_node=true but [meshcore] contact_public_key "
+                        "is not set — this is unsafe: ANY paired contact could trigger "
+                        "alerts. Set contact_public_key or set require_from_my_node=false"
+                    )
+                    ok = False
+            elif not cfg.trigger.my_node_id:
+                logger.critical(
+                    "❌ require_from_my_node=true but my_node_id is not set — "
+                    "this is unsafe: ANY node on the mesh could trigger alerts. "
+                    "Set my_node_id or set require_from_my_node=false in config.toml"
+                )
+                ok = False
 
         # Dead man config sanity
         if cfg.dead_man.enabled:

@@ -3,6 +3,11 @@
 # Copy this file to config.toml and fill in the values.
 # ──────────────────────────────────────────────────────────────────────────
 
+[transport]
+# Which mesh network to watch: "meshtastic" or "meshcore"
+type = "meshtastic"
+
+
 [meshtastic]
 # IP address of the Meshtastic node on your local network
 host = "192.168.1.XXX"
@@ -12,14 +17,28 @@ port = 4403
 reconnect_delay = 10
 
 
+# Only used when transport.type = "meshcore". Same shape as [meshtastic]
+# above, but the source filter below is a public key, not a node ID —
+# MeshCore identifies senders by contact, not by broadcast channel.
+# [meshcore]
+# host = "192.168.1.XXX"
+# port = 4000
+# reconnect_delay = 10
+# # Public key of the paired contact allowed to trigger alerts (required if
+# # [trigger].require_from_my_node is true)
+# contact_public_key = "XXXXXXXX..."
+
+
 [trigger]
 # Keywords that trigger an emergency alert (case-insensitive, whole-word match)
 keywords = ["HELP", "URGENCE", "SOS", "MAYDAY"]
 
 # ID of your source node — find it in the Meshtastic app (e.g. "!abcdef01")
+# Only used when transport.type = "meshtastic"; MeshCore uses
+# [meshcore].contact_public_key instead.
 my_node_id = "!XXXXXXXX"
 
-# If true, only react to messages coming from my_node_id
+# If true, only react to messages coming from your own node/contact
 require_from_my_node = true
 
 

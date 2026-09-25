@@ -73,6 +73,30 @@ def extract_position_from_node(node_info: dict) -> Optional[Position]:
     )
 
 
+def extract_position_from_contact(contact: Optional[dict]) -> Optional[Position]:
+    """Extract position from a MeshCore contact entry (adv_lat/adv_lon).
+
+    This is the contact's last self-advertised position, not a live
+    per-message position — MeshCore text messages don't carry embedded GPS.
+    """
+    if not contact:
+        return None
+
+    coords = _lat_lon_from_dict(
+        {"latitude": contact.get("adv_lat"), "longitude": contact.get("adv_lon")}
+    )
+    if not coords:
+        return None
+
+    lat, lon = coords
+    return Position(
+        latitude=lat,
+        longitude=lon,
+        timestamp=contact.get("last_advert"),
+        received_at=time.time(),
+    )
+
+
 def extract_position_from_packet(packet: dict) -> Optional[Position]:
     """Extract position from a POSITION_APP packet."""
     decoded = packet.get("decoded", {})
